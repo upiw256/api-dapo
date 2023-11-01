@@ -1,0 +1,3 @@
+@echo off
+echo Menjalankan server pengembangan...
+npm run dev
