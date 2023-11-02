@@ -3,6 +3,8 @@ const app = express();
 const axios = require("axios");
 const port = 3000;
 const cors = require('cors')
+const bcrypt = require('bcrypt')
+const bodyParser = require('body-parser')
 app.use(cors({
   origin: "*"
 }))
@@ -54,6 +56,67 @@ app.get("/api/sekolah", async (req, res) => {
   // Kirim data sebagai respons JSON
   res.json(data);
 });
+app.use(bodyParser.json());
+
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+
+  try {
+    // Ambil token API dari variabel lingkungan
+    const token = process.env.API_KEY;
+
+    // Membuat header dengan token
+    const headers = {
+      'Authorization': `Bearer ${token}`
+    };
+
+    // URL API eksternal
+    const apiURL = `http://www.localhost:5774/WebService/getPengguna?npsn=20227907`;
+
+    // Lakukan permintaan GET ke API eksternal dengan header token
+    const response = await axios.get(apiURL, { headers });
+
+    const users = response.data; // Data pengguna dari API
+    console.log(users)
+    // Cari pengguna dengan username yang sesuai
+    const user = users.rows.find((row) => row.username === username);
+
+    if (!user) {
+      return res.status(401).json({ 
+        status:401,        
+        message: "Username tidak ditemukan" });
+    }
+
+    // Bandingkan password yang diberikan dengan password yang disimpan dalam database
+    bcrypt.compare(password, user.password, (err, result) => {
+      if (err) {
+        return res.status(500).json({ message: "Terjadi kesalahan saat memeriksa password" });
+      }
+      
+      if (result) {
+        return res.json({ 
+          status:200,
+          message: "Autentikasi berhasil",
+          data:[{
+            id_user: user.pengguna_id,
+            id_ptk: user.ptk_id,
+            username: user.username,
+            name: user.nama,
+            role: user.peran_id_str
+          }]
+         });
+      } else {
+        return res.status(401).json({ 
+          status: 401,
+          message: "Password salah" 
+        });
+      }
+    });
+  } catch (error) {
+    console.log(error)
+    return res.status(500).json({ message: "Terjadi kesalahan saat mengambil data pengguna dari API" });
+  }
+});
 app.get("/api/siswa", async (req, res) => {
   const nisn = req.query.nisn;
   const nama = req.query.nama;
@@ -67,10 +130,10 @@ app.get("/api/siswa", async (req, res) => {
   try {
     const response = await axios.get(url, { headers });
     const data = response.data;
-
     if (nisn) {
       // Jika parameter nisn ada, filter data siswa dengan NISN yang cocok
       const filteredData = data.rows.find((row) => row.nisn === nisn);
+      console.log(filteredData.nama);
       if (filteredData) {
         res.json(filteredData);
       } else {
