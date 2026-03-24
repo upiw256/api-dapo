@@ -1,174 +1,160 @@
 const express = require("express");
-const app = express();
 const axios = require("axios");
-const port = 3000;
-const cors = require('cors')
-const bcrypt = require('bcrypt')
-const bodyParser = require('body-parser')
-app.use(cors({
-  origin: "*"
-}))
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const bodyParser = require('body-parser');
 require('dotenv').config();
 
-// Middleware untuk validasi barrier
+const app = express();
+const port = 30000;
+
+// Konfigurasi Dasar
+const NPSN = "20227907";
+const BASE_URL = process.env.BASE_URL || "http://192.168.10.2:5774/WebService"; // Hapus 'www' supaya tidak ECONNREFUSED
+
+// Middleware
+app.use(cors({ origin: "*" }));
+app.use(bodyParser.json());
+
+// Middleware untuk validasi barrier (X-Barrier)
 function validateBarrier(req, res, next) {
   const barrier = process.env.X_BARRIER;
-  const providedBarrier = req.header("X-Barrier"); // Ambil nilai barrier dari header 'X-Barrier'
+  const providedBarrier = req.header("X-Barrier");
     
   if (providedBarrier === barrier) {
-    // Jika barrier sesuai, lanjutkan ke endpoint berikutnya
     next();
   } else {
-    // Jika barrier tidak sesuai, kirim respons kesalahan
-    res
-      .status(401)
-      .json({ message: "Anda tidak diizinkan mengakses endpoint ini." });
+    res.status(401).json({ 
+      status: 401,
+      message: "Akses ditolak! Kamu tidak punya izin (Barrier Salah)." 
+    });
   }
 }
 
-// Middleware ini akan diterapkan pada setiap permintaan
-app.use((req, res, next) => {
-  validateBarrier(req, res, next);
-});
+// Terapkan barrier ke semua API
+app.use(validateBarrier);
 
-// Endpoint pertama
+// Fungsi pembantu untuk ambil data dari WebService
+async function fetchData(endpoint) {
+  const token = process.env.API_KEY;
+  const url = `${BASE_URL}/${endpoint}?npsn=${NPSN}`;
+  
+  const response = await axios.get(url, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  return response.data;
+}
+
+// 1. Endpoint Guru (GTK)
 app.get("/api/guru", async (req, res) => {
-    const url = "http://www.localhost:5774/WebService/getGtk?npsn=20227907";
-    const token = process.env.API_KEY;
-    const headers = {
-        'Authorization': `Bearer ${token}`
-      };
-  const response = await axios.get(url, {headers});
-  const data = response.data;
-
-  // Kirim data sebagai respons JSON
-  res.json(data);
+  try {
+    const data = await fetchData("getGtk");
+    res.json(data);
+  } catch (error) {
+    console.error("Error Guru:", error.message);
+    res.status(500).json({ error: "Gagal ambil data guru. Pastikan server port 5774 aktif!" });
+  }
 });
+
+// 2. Endpoint Sekolah
 app.get("/api/sekolah", async (req, res) => {
-    const url = "http://www.localhost:5774/WebService/getSekolah?npsn=20227907";
-    const token = process.env.API_KEY;
-    const headers = {
-        'Authorization': `Bearer ${token}`
-      };
-  const response = await axios.get(url, {headers});
-  const data = response.data;
-
-  // Kirim data sebagai respons JSON
-  res.json(data);
+  try {
+    const data = await fetchData("getSekolah");
+    res.json(data);
+  } catch (error) {
+    console.error("Error Sekolah:", error.message);
+    res.status(500).json({ error: "Gagal ambil data sekolah." });
+  }
 });
-app.use(bodyParser.json());
 
+// 3. Endpoint Login
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
 
   try {
-    // Ambil token API dari variabel lingkungan
-    const token = process.env.API_KEY;
-
-    // Membuat header dengan token
-    const headers = {
-      'Authorization': `Bearer ${token}`
-    };
-
-    // URL API eksternal
-    const apiURL = `http://www.localhost:5774/WebService/getPengguna?npsn=20227907`;
-
-    // Lakukan permintaan GET ke API eksternal dengan header token
-    const response = await axios.get(apiURL, { headers });
-
-    const users = response.data; // Data pengguna dari API
-    console.log(users)
-    // Cari pengguna dengan username yang sesuai
+    const users = await fetchData("getPengguna");
     const user = users.rows.find((row) => row.username === username);
 
     if (!user) {
-      return res.status(401).json({ 
-        status:401,        
-        message: "Username tidak ditemukan" });
+      return res.status(401).json({ status: 401, message: "Username tidak ditemukan" });
     }
 
-    // Bandingkan password yang diberikan dengan password yang disimpan dalam database
     bcrypt.compare(password, user.password, (err, result) => {
-      if (err) {
-        return res.status(500).json({ message: "Terjadi kesalahan saat memeriksa password" });
-      }
+      if (err) return res.status(500).json({ message: "Gagal cek password" });
       
       if (result) {
         return res.json({ 
-          status:200,
-          message: "Autentikasi berhasil",
-          data:[{
+          status: 200,
+          message: "Halo! Kamu berhasil masuk.",
+          data: [{
             id_user: user.pengguna_id,
             id_ptk: user.ptk_id,
             username: user.username,
             name: user.nama,
             role: user.peran_id_str
           }]
-         });
-      } else {
-        return res.status(401).json({ 
-          status: 401,
-          message: "Password salah" 
         });
+      } else {
+        return res.status(401).json({ status: 401, message: "Password salah, coba diingat lagi ya!" });
       }
     });
   } catch (error) {
-    console.log(error)
-    return res.status(500).json({ message: "Terjadi kesalahan saat mengambil data pengguna dari API" });
+    console.error("Error Login:", error.message);
+    res.status(500).json({ error: "Terjadi gangguan koneksi saat login." });
   }
 });
-app.get("/api/siswa", async (req, res) => {
-  const nisn = req.query.nisn;
-  const nama = req.query.nama;
-  const url = `http://www.localhost:5774/WebService/getPesertaDidik?npsn=20227907`; // URL tetap
 
-  const token = process.env.API_KEY;
-  const headers = {
-    Authorization: `Bearer ${token}`,
-  };
+// 4. Endpoint Siswa (Filter NISN & Nama)
+app.get("/api/siswa", async (req, res) => {
+  const { nisn, nama } = req.query;
 
   try {
-    const response = await axios.get(url, { headers });
-    const data = response.data;
+    const data = await fetchData("getPesertaDidik");
+    
+    if (!data || !data.rows) {
+      return res.status(404).json({ error: "Data siswa kosong dari server pusat." });
+    }
+
     if (nisn) {
-      // Jika parameter nisn ada, filter data siswa dengan NISN yang cocok
       const filteredData = data.rows.find((row) => row.nisn === nisn);
-      console.log(filteredData.nama);
       if (filteredData) {
         res.json(filteredData);
       } else {
-        res.status(404).json({ error: "Data siswa dengan NISN yang diberikan tidak ditemukan." });
+        res.status(404).json({ error: `Siswa dengan NISN ${nisn} tidak ada.` });
       }
-    } else if(nama) {
-      // Jika parameter nama ada, filter data siswa berdasarkan nama yang mendekati
-      const filteredData = data.rows.filter((row) => row.nama.toLowerCase().includes(nama.toLowerCase()));
-
+    } else if (nama) {
+      const filteredData = data.rows.filter((row) => 
+        row.nama && row.nama.toLowerCase().includes(nama.toLowerCase())
+      );
       if (filteredData.length > 0) {
         res.json(filteredData);
       } else {
-        res.status(404).json({ error: "Data siswa dengan nama yang mendekati tidak ditemukan." });
+        res.status(404).json({ error: "Nama siswa tersebut tidak ditemukan." });
       }
-    }else{
+    } else {
       res.json(data);
     }
   } catch (error) {
-    res.status(500).json({ error: "Terjadi kesalahan dalam mengambil data siswa." });
+    console.error("Error Siswa:", error.message);
+    res.status(500).json({ error: "Gagal ambil data siswa. Cek koneksi server lokal kamu." });
   }
 });
-app.get("/api/rombel", async (req, res) => {
-    const url = "http://www.localhost:5774/WebService/getRombonganBelajar?npsn=20227907";
-    const token = process.env.API_KEY;
-    const headers = {
-        'Authorization': `Bearer ${token}`
-      };
-  const response = await axios.get(url, {headers});
-  const data = response.data;
 
-  // Kirim data sebagai respons JSON
-  res.json(data);
+// 5. Endpoint Rombel
+app.get("/api/rombel", async (req, res) => {
+  try {
+    const data = await fetchData("getRombonganBelajar");
+    res.json(data);
+  } catch (error) {
+    console.error("Error Rombel:", error.message);
+    res.status(500).json({ error: "Gagal ambil data rombel." });
+  }
 });
 
-
+// Jalankan Server
 app.listen(port, () => {
-  console.log(`Server berjalan di port ${port}`);
+  console.log(`-------------------------------------------`);
+  console.log(`Siap! Server jalan di http://localhost:${port}`);
+  console.log(`Pastikan aplikasi di port 5774 juga menyala ya!`);
+  console.log(`-------------------------------------------`);
 });
