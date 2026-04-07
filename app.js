@@ -16,6 +16,20 @@ const BASE_URL = process.env.BASE_URL || "http://192.168.10.2:5774/WebService"; 
 app.use(cors({ origin: "*" }));
 app.use(bodyParser.json());
 
+// Middleware untuk Logging Aktivitas
+app.use((req, res, next) => {
+  const start = Date.now();
+  const date = new Date().toLocaleString("id-ID");
+  
+  // Tangkap saat request selesai
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`[${date}] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} (${duration}ms)`);
+  });
+  
+  next();
+});
+
 // Middleware untuk validasi barrier (X-Barrier)
 function validateBarrier(req, res, next) {
   const barrier = process.env.X_BARRIER;
@@ -44,7 +58,14 @@ async function fetchData(endpoint) {
   });
   return response.data;
 }
-
+app.get("/api", async (req, res) => {
+  try {
+    res.status(200).json({ status: "connected" })
+  } catch (error) {
+    console.error("Error Guru:", error.message);
+    res.status(500).json({ error: "Gagal ambil data guru. Pastikan server port 5774 aktif!" });
+  }
+});
 // 1. Endpoint Guru (GTK)
 app.get("/api/guru", async (req, res) => {
   try {

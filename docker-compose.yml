@@ -4,13 +4,14 @@ services:
   api-bridge:
     build: .
     container_name: bridge-dapodik
+    restart: always
     ports:
       - "30000:30000"
     env_file:
       - .env
     environment:
+      # Mengarahkan BASE_URL ke IP laptop/server host kamu
       - BASE_URL=http://192.168.10.2:5774/WebService
-    restart: always
-    # Menambahkan host khusus agar container mengenali IP lokal dengan nama alias
+      - NODE_ENV=production
     extra_hosts:
       - "host.docker.internal:192.168.10.2"
